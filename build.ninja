@@ -1,0 +1,12 @@
+cflags = -I/usr/include/libctf -Isrc
+ldflags = -lbsdctf -lelf
+
+rule compile
+ command = clang $cflags -c $in -o $out
+
+rule link
+ command = clang -o $out $in $ldflags
+
+build obj/main.o: compile src/main.c
+build bin/ctfmemusage: link obj/main.o
+
