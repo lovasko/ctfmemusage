@@ -8,6 +8,15 @@
 #include <gelf.h>
 #include <libgen.h>
 
+/**
+ * Locate an ELF section with specific header name.
+ *
+ * @param elf elf file
+ * @param elf_header elf header
+ * @param to_find section name
+ * @return tuple struct containing offset and size of the section or NULL if
+ *         such section does not exist
+ */
 static struct _section*
 elf_section_find (Elf* elf, Elf32_Ehdr* elf_header, const char* to_find)
 {
@@ -36,96 +45,211 @@ elf_section_find (Elf* elf, Elf32_Ehdr* elf_header, const char* to_find)
 	return NULL;
 }
 
-int
-main (int argc, char* argv[])
+static size_t
+ctf_storage (Elf* elf, Elf32_Ehdr* elf_header)
 {
-	ctf_file file;
-	size_t memory_usage = 0;
-	size_t ctf_storage_usage = 0;
-	size_t dwarf_storage_usage = 0;
+	size_t usage = 0;
 
-	ctf_file_read(argv[1], &file);
-	memory_usage = ctf_file_memory_usage(file);	
+	struct _section* ctf = elf_section_find(elf, elf_header, ".SUNW_ctf");
+	struct _section* strtab = elf_section_find(elf, elf_header, ".strtab");
+	struct _section* symtab = elf_section_find(elf, elf_header, ".symtab");
 
+	if (ctf != NULL)
+		usage += ctf->size;
+	
+	if (strtab != NULL)
+		usage += strtab->size;
 
-	int fd;
-	if ((fd = open(argv[1], O_RDONLY)) < 0)
+	if (symtab != NULL)
+		usage += symtab->size;
+
+	return usage;
+}
+
+static size_t
+dwarf_storage (Elf* elf, Elf32_Ehdr* elf_header)
+{
+	size_t usage = 0;
+
+	struct _section* dwarf_info = elf_section_find(elf, elf_header, 
+	    ".debug_info");
+	struct _section* dwarf_str = elf_section_find(elf, elf_header,
+	    ".debug_str");
+
+	if (dwarf_info != NULL)
+		usage += dwarf_info->size;
+
+	if (dwarf_str != NULL)
+		usage += dwarf_str->size;
+
+	return usage;
+}
+
+static void
+print_ctf (size_t memory_usage, size_t ctf_storage_usage, uint8_t r_flag, 
+	uint8_t s_flag, uint8_t d_flag)
+{
+	float ratio = (float)memory_usage/(float)ctf_storage_usage;
+
+	if (r_flag && s_flag)
+	{
+		printf("%.3f\n", ratio);
+		return;
+	}
+
+	printf("CTF memory vs. CTF storage\n");	
+	printf("--------------------------\n");	
+	printf("   Memory usage: %u bytes\n", memory_usage);
+	printf("  Storage usage: %u bytes\n", ctf_storage_usage);
+
+	if (r_flag)
+		printf("          Ratio: %.3f\n", ratio);
+
+	if (d_flag)
+		printf("\n");
+}
+
+static void
+print_dwarf (size_t ctf_storage_usage, size_t dwarf_storage_usage, 
+    uint8_t r_flag, uint8_t s_flag)
+{
+	float ratio = (float)dwarf_storage_usage/(float)ctf_storage_usage;
+
+	if (r_flag && s_flag)
+	{
+		printf("%.3f\n", ratio);
+		return;
+	}
+		
+	printf("DWARF storage vs. CTF storage\n");	
+	printf("-----------------------------\n");	
+	printf("  DWARF: %u bytes\n", dwarf_storage_usage);
+	printf("    CTF: %u bytes\n", ctf_storage_usage);
+
+	if (r_flag)
+		printf("  Ratio: %.3f\n", ratio);
+}
+
+static int 
+load_elf (char* filename, int* fd, Elf** elf, Elf32_Ehdr* elf_header)
+{
+	if ((*fd = open(filename, O_RDONLY)) < 0)
 		return 1;
 
 	/* read the ELF header */
-	Elf32_Ehdr elf_header;
-	if (read(fd, &elf_header, sizeof(Elf32_Ehdr)) != sizeof(Elf32_Ehdr))
+	if (read(*fd, elf_header, sizeof(Elf32_Ehdr)) != sizeof(Elf32_Ehdr))
 	{
-		close(fd);
+		close(*fd);
 		return 1;
 	}
 
 	/* set the libelf version */
 	if (elf_version(EV_CURRENT) == EV_NONE)
 	{
-		close(fd);
+		close(*fd);
 		return 1;
 	}
 
 	/* load the ELF file */
-	Elf* elf = NULL;
-	if ((elf = elf_begin(fd, ELF_C_READ, NULL)) == NULL)
+	if ((*elf = elf_begin(*fd, ELF_C_READ, NULL)) == NULL)
 	{
-		close(fd);
+		close(*fd);
 		return 1;
 	}
 
-	/* find the CTF section */
-	struct _section* ctf_section = elf_section_find(elf, &elf_header,
-	    ".SUNW_ctf");
-
-	/* find the string table section */
-	struct _section* strtab_section = elf_section_find(elf, &elf_header,
-	    ".strtab");
-
-	/* find the symbol table section */
-	struct _section* symtab_section = elf_section_find(elf, &elf_header,
-	    ".symtab");
-
-	if (ctf_section != NULL)
-		ctf_storage_usage += ctf_section->size;
-	
-	if (strtab_section != NULL)
-		ctf_storage_usage += strtab_section->size;
-
-	if (symtab_section != NULL)
-		ctf_storage_usage += symtab_section->size;
-
-	/* find the DWARF core info table */
-	struct _section* dwarf_info_section = elf_section_find(elf, &elf_header,
-	    ".debug_info");
-
-	/* find the DWARF string table */
-	struct _section* dwarf_str_section = elf_section_find(elf, &elf_header,
-	    ".debug_str");
-
-	if (dwarf_info_section != NULL)
-		dwarf_storage_usage += dwarf_info_section->size;
-
-	if (dwarf_str_section != NULL)
-		dwarf_storage_usage += dwarf_str_section->size;
-
-	printf("CTF memory vs. CTF storage\n");	
-	printf("--------------------------\n");	
-	printf("   Memory usage: %u bytes\n", memory_usage);
-	printf("  Storage usage: %u bytes\n", ctf_storage_usage);
-	printf("          Ratio: %.3f\n", 
-	    (float)memory_usage/(float)ctf_storage_usage);
-
-	printf("\n");
-
-	printf("DWARF storage vs. CTF storage\n");	
-	printf("-----------------------------\n");	
-	printf("  DWARF: %u bytes\n", dwarf_storage_usage);
-	printf("    CTF: %u bytes\n", ctf_storage_usage);
-	printf("  Ratio: %.3f\n", 
-	    (float)dwarf_storage_usage/(float)ctf_storage_usage);
-
 	return 0;
+}
+
+static void
+usage ()
+{
+	printf("Usage: ctfmemusage [-dhlrs] file\n");
+}
+
+/**
+ * ctfmemusage - inspect library memory usage and comparison against the DWARF
+ * format.
+ */
+int
+main (int argc, char* argv[])
+{
+	Elf* elf = NULL;
+	Elf32_Ehdr elf_header;
+	ctf_file file;
+	int fd;
+	int retval;
+	size_t ctf_memory_usage = 0;
+	size_t ctf_storage_usage = 0;
+	size_t dwarf_storage_usage = 0;
+	uint8_t l_flag = 0;
+	uint8_t d_flag = 0;
+	uint8_t r_flag = 0;
+	uint8_t s_flag = 0;
+	int option;
+
+	while ((option = getopt(argc, argv, "ldhrs")) != -1)
+	{
+		switch(option)
+		{
+			case 'l': 
+				l_flag = 1;
+			break;
+
+			case 'd': 
+				d_flag = 1;
+			break;
+
+			case 'r': 
+				r_flag = 1;
+			break;
+
+			case 's': 
+				s_flag = 1;
+			break;
+
+			case 'h':
+				usage();
+				return EXIT_FAILURE;
+
+			case '?':
+				fprintf(stderr, "ERROR: invalid option %c\n", optopt);	
+				usage();
+				return EXIT_FAILURE;
+
+			default: 
+				fprintf(stderr, "ERROR: unknown error during option parsing\n");	
+				return EXIT_FAILURE;
+		}
+	}
+
+	if (argc - optind < 1)
+	{
+		usage();
+		return EXIT_FAILURE;
+	}
+
+	if ((retval = ctf_file_read(argv[optind], &file)) != CTF_OK)
+	{
+		fprintf(stderr, "ERROR: %s\n", ctf_get_error_string(retval));
+		return EXIT_FAILURE;
+	}
+
+	if (load_elf(argv[optind], &fd, &elf, &elf_header) != 0)
+	{
+		fprintf(stderr, "ERROR: unable to load ELF\n");
+		return EXIT_FAILURE;
+	}
+
+	ctf_memory_usage = ctf_file_memory_usage(file);
+	ctf_storage_usage = ctf_storage(elf, &elf_header);
+	dwarf_storage_usage = dwarf_storage(elf, &elf_header);
+
+	if (l_flag)
+		print_ctf(ctf_memory_usage, ctf_storage_usage, r_flag, s_flag, d_flag);
+
+	if (d_flag)
+		print_dwarf(ctf_storage_usage, dwarf_storage_usage, r_flag, s_flag);
+
+	return EXIT_SUCCESS;
 }
 
