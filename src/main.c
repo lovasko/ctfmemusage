@@ -273,6 +273,13 @@ main (int argc, char* argv[])
 		}
 	}
 
+	if (s_flag && !r_flag)
+	{
+		fprintf(stderr, 
+		    "ERROR: the -s option has no usage without the -r option\n");
+		return EXIT_FAILURE;
+	}
+
 	if (argc - optind < 1)
 	{
 		usage();
