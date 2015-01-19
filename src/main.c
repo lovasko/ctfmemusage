@@ -11,9 +11,9 @@
 /**
  * Locate an ELF section with specific header name.
  *
- * @param elf elf file
- * @param elf_header elf header
- * @param to_find section name
+ * @param[in] elf elf file
+ * @param[in] elf_header elf header
+ * @param[in] to_find section name
  * @return tuple struct containing offset and size of the section or NULL if
  *         such section does not exist
  */
@@ -45,6 +45,16 @@ elf_section_find (Elf* elf, Elf32_Ehdr* elf_header, const char* to_find)
 	return NULL;
 }
 
+/**
+ * Compute CTF disk storage size.
+ *
+ * The ELF sections that contribute to the result are: .SUNW_ctf, .strtab and
+ * .symtab.
+ *
+ * @param[in] elf elf file
+ * @param[in] elf_header elf header
+ * @return size in bytes
+ */
 static size_t
 ctf_storage (Elf* elf, Elf32_Ehdr* elf_header)
 {
@@ -66,6 +76,16 @@ ctf_storage (Elf* elf, Elf32_Ehdr* elf_header)
 	return usage;
 }
 
+/**
+ * Compute DWARF disk storage size.
+ *
+ * The ELF sections that contribute to the result are: .debug_info and
+ * .debug_str.
+ *
+ * @param[in] elf elf file
+ * @param[in] elf_header elf header
+ * @return size in bytes
+ */
 static size_t
 dwarf_storage (Elf* elf, Elf32_Ehdr* elf_header)
 {
@@ -85,6 +105,17 @@ dwarf_storage (Elf* elf, Elf32_Ehdr* elf_header)
 	return usage;
 }
 
+/**
+ * Print formatted output of the CTF data usage comparison between disk storage
+ * and in-memory storage.
+ *
+ * @param[in] memory_usage size of the CTF in the memory
+ * @param[in] ctf_storage_usage size of the CTF on the disk
+ * @param[in] r_flag include ratio flag
+ * @param[in] s_flag simple ratio output flag
+ * @param[in] d_flag include DWARF flag - depending on the presence we add the 
+ *                   empty line at the end of the output
+ */
 static void
 print_ctf (size_t memory_usage, size_t ctf_storage_usage, uint8_t r_flag, 
 	uint8_t s_flag, uint8_t d_flag)
@@ -109,6 +140,14 @@ print_ctf (size_t memory_usage, size_t ctf_storage_usage, uint8_t r_flag,
 		printf("\n");
 }
 
+/**
+ * Print formatted output of the CTF and DWARF disk usage comparison.
+ *
+ * @param[in] ctf_storage_usage size of the CTF on the disk
+ * @param[in] dwarf_storage_usage size of the DWARF on the disk
+ * @param[in] r_flag include ratio flag
+ * @param[in] s_flag simple ratio output flag
+ */
 static void
 print_dwarf (size_t ctf_storage_usage, size_t dwarf_storage_usage, 
     uint8_t r_flag, uint8_t s_flag)
@@ -130,6 +169,15 @@ print_dwarf (size_t ctf_storage_usage, size_t dwarf_storage_usage,
 		printf("  Ratio: %.3f\n", ratio);
 }
 
+/**
+ * Load the ELF file.
+ *
+ * @param[in] filename ELF filename
+ * @param[out] fd file descriptor
+ * @param[out] elf elf file
+ * @param[out] elf_header elf header
+ * @return 0 on success, 1 otherwise
+ */
 static int 
 load_elf (char* filename, int* fd, Elf** elf, Elf32_Ehdr* elf_header)
 {
@@ -160,6 +208,9 @@ load_elf (char* filename, int* fd, Elf** elf, Elf32_Ehdr* elf_header)
 	return 0;
 }
 
+/**
+ * Print the usage message.
+ */
 static void
 usage ()
 {
