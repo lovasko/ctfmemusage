@@ -1,4 +1,4 @@
-cflags = -I/usr/include/libctf -Isrc
+cflags = -I/usr/include/libctf -Isrc -Wall -Wextra -Weverything
 ldflags = -lbsdctf -lelf
 
 rule compile
