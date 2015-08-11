@@ -1,4 +1,4 @@
-#include <libctf/libctf.h>
+#include <ctf/ctf.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
