@@ -18,22 +18,23 @@
  *         such section does not exist
  */
 static struct _section*
-elf_section_find (Elf* elf, Elf32_Ehdr* elf_header, const char* to_find)
+find_elf_section(Elf* elf, Elf32_Ehdr* elf_header, const char* to_find)
 {
-	Elf_Scn* section = NULL;  	
+	Elf_Data* data;
+	Elf_Scn* section;  	
 	GElf_Shdr section_header;
+	char* section_name;
+	struct _section* result;
 	
-	while ((section = elf_nextscn(elf, section)) != 0)
-	{
+	section = NULL;
+	while ((section = elf_nextscn(elf, section)) != 0) {
 		gelf_getshdr(section, &section_header);
-		char* section_name = elf_strptr(elf, elf_header->e_shstrndx, 
+		section_name = elf_strptr(elf, elf_header->e_shstrndx, 
 		    section_header.sh_name);
 
-		if (strcmp(section_name, to_find) == 0)
-		{
-			Elf_Data* data = elf_getdata(section, NULL);
-
-			struct _section* result = malloc(_SECTION_SIZE);
+		if (strcmp(section_name, to_find) == 0) {
+			data = elf_getdata(section, NULL);
+			result = malloc(_SECTION_SIZE);
 			result->size = data->d_size;
 			result->data = malloc(data->d_size);
 			memcpy(result->data, data->d_buf, data->d_size);
@@ -60,9 +61,9 @@ ctf_storage (Elf* elf, Elf32_Ehdr* elf_header)
 {
 	size_t usage = 0;
 
-	struct _section* ctf = elf_section_find(elf, elf_header, ".SUNW_ctf");
-	struct _section* strtab = elf_section_find(elf, elf_header, ".strtab");
-	struct _section* symtab = elf_section_find(elf, elf_header, ".symtab");
+	struct _section* ctf = find_elf_section(elf, elf_header, ".SUNW_ctf");
+	struct _section* strtab = find_elf_section(elf, elf_header, ".strtab");
+	struct _section* symtab = find_elf_section(elf, elf_header, ".symtab");
 
 	if (ctf != NULL)
 		usage += ctf->size;
@@ -91,9 +92,9 @@ dwarf_storage (Elf* elf, Elf32_Ehdr* elf_header)
 {
 	size_t usage = 0;
 
-	struct _section* dwarf_info = elf_section_find(elf, elf_header, 
+	struct _section* dwarf_info = find_elf_section(elf, elf_header, 
 	    ".debug_info");
-	struct _section* dwarf_str = elf_section_find(elf, elf_header,
+	struct _section* dwarf_str = find_elf_section(elf, elf_header,
 	    ".debug_str");
 
 	if (dwarf_info != NULL)
