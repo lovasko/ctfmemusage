@@ -17,16 +17,14 @@
  * @return tuple struct containing offset and size of the section or NULL if
  *         such section does not exist
  */
-static struct _section*
-find_elf_section(Elf* elf, Elf32_Ehdr* elf_header, const char* to_find)
+static size_t
+sizeof_elf_section(Elf* elf, Elf32_Ehdr* elf_header, const char* to_find)
 {
 	Elf_Data* data;
 	Elf_Scn* section;  	
 	GElf_Shdr section_header;
 	char* section_name;
-	struct _section* result;
 	
-	section = NULL;
 	while ((section = elf_nextscn(elf, section)) != 0) {
 		gelf_getshdr(section, &section_header);
 		section_name = elf_strptr(elf, elf_header->e_shstrndx, 
@@ -34,16 +32,11 @@ find_elf_section(Elf* elf, Elf32_Ehdr* elf_header, const char* to_find)
 
 		if (strcmp(section_name, to_find) == 0) {
 			data = elf_getdata(section, NULL);
-			result = malloc(_SECTION_SIZE);
-			result->size = data->d_size;
-			result->data = malloc(data->d_size);
-			memcpy(result->data, data->d_buf, data->d_size);
-
-			return result;
+			return data->d_size;
 		}
 	}
 
-	return NULL;
+	return 0;
 }
 
 /**
@@ -57,22 +50,14 @@ find_elf_section(Elf* elf, Elf32_Ehdr* elf_header, const char* to_find)
  * @return size in bytes
  */
 static size_t
-ctf_storage (Elf* elf, Elf32_Ehdr* elf_header)
+ctf_storage(Elf* elf, Elf32_Ehdr* elf_header)
 {
-	size_t usage = 0;
+	size_t usage;
 
-	struct _section* ctf = find_elf_section(elf, elf_header, ".SUNW_ctf");
-	struct _section* strtab = find_elf_section(elf, elf_header, ".strtab");
-	struct _section* symtab = find_elf_section(elf, elf_header, ".symtab");
-
-	if (ctf != NULL)
-		usage += ctf->size;
-	
-	if (strtab != NULL)
-		usage += strtab->size;
-
-	if (symtab != NULL)
-		usage += symtab->size;
+	usage = 0;
+	usage += sizeof_elf_section(elf, elf_header, ".SUNW_ctf");
+	usage += sizeof_elf_section(elf, elf_header, ".strtab");
+	usage += sizeof_elf_section(elf, elf_header, ".symtab");
 
 	return usage;
 }
@@ -88,20 +73,13 @@ ctf_storage (Elf* elf, Elf32_Ehdr* elf_header)
  * @return size in bytes
  */
 static size_t
-dwarf_storage (Elf* elf, Elf32_Ehdr* elf_header)
+dwarf_storage(Elf* elf, Elf32_Ehdr* elf_header)
 {
-	size_t usage = 0;
+	size_t usage;
 
-	struct _section* dwarf_info = find_elf_section(elf, elf_header, 
-	    ".debug_info");
-	struct _section* dwarf_str = find_elf_section(elf, elf_header,
-	    ".debug_str");
-
-	if (dwarf_info != NULL)
-		usage += dwarf_info->size;
-
-	if (dwarf_str != NULL)
-		usage += dwarf_str->size;
+	usage = 0;
+	usage += sizeof_elf_section(elf, elf_header, ".debug_info");
+	usage += sizeof_elf_section(elf, elf_header, ".debug_str");
 
 	return usage;
 }
@@ -118,13 +96,25 @@ dwarf_storage (Elf* elf, Elf32_Ehdr* elf_header)
  *                   empty line at the end of the output
  */
 static void
-print_ctf (size_t memory_usage, size_t ctf_storage_usage, uint8_t r_flag, 
-	uint8_t s_flag, uint8_t d_flag)
+print_ctf(size_t memory_usage,
+          size_t storage_usage,
+          uint8_t r_flag, 
+          uint8_t s_flag)
 {
-	float ratio = (float)memory_usage/(float)ctf_storage_usage;
+	float ratio;
+	
+	if (storage_usage == 0) {
+		fprintf(stderr, "ERROR: unable to compute the CTF on-disk size\n");
+		return;
+	}
+	
+	if (memory_usage == 0) {
+		fprintf(stderr, "ERROR: unable to compute the CTF in-memory size\n");
+		return;
+	}
 
-	if (r_flag && s_flag)
-	{
+	ratio = (float)memory_usage/(float)storage_usage;
+	if (r_flag && s_flag) {
 		printf("%.3f\n", ratio);
 		return;
 	}
@@ -132,13 +122,10 @@ print_ctf (size_t memory_usage, size_t ctf_storage_usage, uint8_t r_flag,
 	printf("CTF memory vs. CTF storage\n");	
 	printf("--------------------------\n");	
 	printf("   Memory usage: %u bytes\n", memory_usage);
-	printf("  Storage usage: %u bytes\n", ctf_storage_usage);
+	printf("  Storage usage: %u bytes\n", storage_usage);
 
 	if (r_flag)
 		printf("          Ratio: %.3f\n", ratio);
-
-	if (d_flag)
-		printf("\n");
 }
 
 /**
@@ -150,13 +137,25 @@ print_ctf (size_t memory_usage, size_t ctf_storage_usage, uint8_t r_flag,
  * @param[in] s_flag simple ratio output flag
  */
 static void
-print_dwarf (size_t ctf_storage_usage, size_t dwarf_storage_usage, 
-    uint8_t r_flag, uint8_t s_flag)
+print_dwarf(size_t ctf_storage_usage,
+            size_t dwarf_storage_usage,
+            uint8_t r_flag,
+            uint8_t s_flag)
 {
-	float ratio = (float)dwarf_storage_usage/(float)ctf_storage_usage;
+	float ratio;
+	
+	if (ctf_storage_usage == 0) {
+		fprintf(stderr, "ERROR: unable to compute the CTF on-disk size\n");
+		return;
+	}
 
-	if (r_flag && s_flag)
-	{
+	if (dwarf_storage_usage == 0) {
+		fprintf(stderr, "ERROR: unable to compute the DWARF on-disk size\n");
+		return;
+	}
+
+	ratio = (float)dwarf_storage_usage/(float)ctf_storage_usage;
+	if (r_flag && s_flag) {
 		printf("%.3f\n", ratio);
 		return;
 	}
@@ -180,28 +179,23 @@ print_dwarf (size_t ctf_storage_usage, size_t dwarf_storage_usage,
  * @return 0 on success, 1 otherwise
  */
 static int 
-load_elf (char* filename, int* fd, Elf** elf, Elf32_Ehdr* elf_header)
+load_elf(char* filename, int* fd, Elf** elf, Elf32_Ehdr* elf_header)
 {
 	if ((*fd = open(filename, O_RDONLY)) < 0)
 		return 1;
 
-	/* read the ELF header */
-	if (read(*fd, elf_header, sizeof(Elf32_Ehdr)) != sizeof(Elf32_Ehdr))
-	{
+	/* TODO GElf */
+	if (read(*fd, elf_header, sizeof(Elf32_Ehdr)) != sizeof(Elf32_Ehdr)) {
 		close(*fd);
 		return 1;
 	}
 
-	/* set the libelf version */
-	if (elf_version(EV_CURRENT) == EV_NONE)
-	{
+	if (elf_version(EV_CURRENT) == EV_NONE) {
 		close(*fd);
 		return 1;
 	}
 
-	/* load the ELF file */
-	if ((*elf = elf_begin(*fd, ELF_C_READ, NULL)) == NULL)
-	{
+	if ((*elf = elf_begin(*fd, ELF_C_READ, NULL)) == NULL) {
 		close(*fd);
 		return 1;
 	}
@@ -213,9 +207,9 @@ load_elf (char* filename, int* fd, Elf** elf, Elf32_Ehdr* elf_header)
  * Print the usage message.
  */
 static void
-usage ()
+usage()
 {
-	printf("Usage: ctfmemusage [-dhlrs] file\n");
+	printf("ctfmemusage [-d | -l ] [-hrs] file\n");
 }
 
 /**
@@ -223,26 +217,28 @@ usage ()
  * format.
  */
 int
-main (int argc, char* argv[])
+main(int argc, char* argv[])
 {
-	Elf* elf = NULL;
+	Elf* elf;
 	Elf32_Ehdr elf_header;
 	ctf_file file;
 	int fd;
-	int retval;
-	size_t ctf_memory_usage = 0;
-	size_t ctf_storage_usage = 0;
-	size_t dwarf_storage_usage = 0;
-	uint8_t l_flag = 0;
-	uint8_t d_flag = 0;
-	uint8_t r_flag = 0;
-	uint8_t s_flag = 0;
 	int option;
+	int retval;
+	size_t ctf_memory_usage;
+	size_t ctf_storage_usage;
+	size_t dwarf_storage_usage;
+	uint8_t d_flag;
+	uint8_t l_flag;
+	uint8_t r_flag;
+	uint8_t s_flag;
 
-	while ((option = getopt(argc, argv, "ldhrs")) != -1)
-	{
-		switch(option)
-		{
+	elf = NULL;
+	l_flag = d_flag = r_flag = s_flag = 0;
+	ctf_memory_usage = ctf_storage_usage = dwarf_storage_usage = 0;
+
+	while ((option = getopt(argc, argv, "ldhrs")) != -1) {
+		switch(option) {
 			case 'l': 
 				l_flag = 1;
 			break;
@@ -274,27 +270,23 @@ main (int argc, char* argv[])
 		}
 	}
 
-	if (s_flag && !r_flag)
-	{
+	if (s_flag && !r_flag) {
 		fprintf(stderr, 
 		    "ERROR: the -s option has no usage without the -r option\n");
 		return EXIT_FAILURE;
 	}
 
-	if (argc - optind < 1)
-	{
+	if (argc - optind < 1) {
 		usage();
 		return EXIT_FAILURE;
 	}
 
-	if ((retval = ctf_file_read(argv[optind], &file)) != CTF_OK)
-	{
+	if ((retval = ctf_file_read(argv[optind], &file)) != CTF_OK) {
 		fprintf(stderr, "ERROR: %s\n", ctf_get_error_string(retval));
 		return EXIT_FAILURE;
 	}
 
-	if (load_elf(argv[optind], &fd, &elf, &elf_header) != 0)
-	{
+	if (load_elf(argv[optind], &fd, &elf, &elf_header) != 0) {
 		fprintf(stderr, "ERROR: unable to load ELF\n");
 		return EXIT_FAILURE;
 	}
@@ -303,8 +295,14 @@ main (int argc, char* argv[])
 	ctf_storage_usage = ctf_storage(elf, &elf_header);
 	dwarf_storage_usage = dwarf_storage(elf, &elf_header);
 
+	if (l_flag && d_flag) {
+		fprintf(stderr, "ERROR: the -l and -d options are mutually exclusive\n");
+		usage();
+		return EXIT_FAILURE;
+	}
+
 	if (l_flag)
-		print_ctf(ctf_memory_usage, ctf_storage_usage, r_flag, s_flag, d_flag);
+		print_ctf(ctf_memory_usage, ctf_storage_usage, r_flag, s_flag);
 
 	if (d_flag)
 		print_dwarf(ctf_storage_usage, dwarf_storage_usage, r_flag, s_flag);
